@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
-<mapper namespace="com.tujia.train.mybatis.mapper.xml.NewsMapper">
+<mapper namespace="com.lianli.train.mybatis.mapper.xml.NewsMapper">
 
     <sql id="Base_Column_List">
         id,
@@ -28,26 +28,26 @@
         </trim>
     </sql>
 
-    <select id="selectAndOrder" resultType="com.tujia.train.mybatis.vo.NewsVo">
+    <select id="selectAndOrder" resultType="com.lianli.train.mybatis.vo.NewsVo">
         select <include refid="Base_Column_List" />
         from news
         <include refid="where-condition" />
     </select>
 
-    <select id="select" resultType="com.tujia.train.mybatis.vo.NewsVo">
+    <select id="select" resultType="com.lianli.train.mybatis.vo.NewsVo">
 
 
     </select>
 
 
     <!-- 查找-->
-    <select id="queryList" resultType="com.tujia.train.mybatis.vo.NewsVo">
+    <select id="queryList" resultType="com.lianli.train.mybatis.vo.NewsVo">
         select <include refid="Base_Column_List" />
         from news
     </select>
 
     <!-- 新增-->
-    <insert id="insert" parameterType="com.tujia.train.mybatis.po.News" useGeneratedKeys="true" keyProperty="id">
+    <insert id="insert" parameterType="com.lianli.train.mybatis.po.News" useGeneratedKeys="true" keyProperty="id">
         insert into news
         <trim prefix="(" suffix=")" suffixOverrides="," >
             <if test="title != null">title,</if>
@@ -71,7 +71,7 @@
 
 
     <!-- 更新-->
-    <update id="update" parameterType="com.tujia.train.mybatis.po.News">
+    <update id="update" parameterType="com.lianli.train.mybatis.po.News">
         update news
         <trim prefix="set" suffixOverrides=",">
             <if test="title != null">title = #{title},</if>
@@ -92,7 +92,7 @@
     </delete>
 
     <!-- 批量新增-->
-    <insert id="batchInsertNews" useGeneratedKeys="true" keyProperty="id" parameterType="com.tujia.train.mybatis.po.News">
+    <insert id="batchInsertNews" useGeneratedKeys="true" keyProperty="id" parameterType="com.lianli.train.mybatis.po.News">
 
         insert into News
         (title,author_id,content)

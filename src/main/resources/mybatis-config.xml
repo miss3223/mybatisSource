@@ -31,20 +31,16 @@
 
     </settings>
 
-    <typeAliases>
-        <typeAlias alias="user" type="com.tujia.train.mybatis.po.User"/>
-    </typeAliases>
-
-    <typeHandlers>
-        <!--
+    <!--<typeHandlers>
+        &lt;!&ndash;
         说明:已经配置了包自动扫描,如果是基于注解的 Handler 已经不用再些进行配置.
         参考示例:
         @see com.ims.model.ac.handler.ExtInfoJsonHandler
-        -->
-        <typeHandler handler="com.tujia.train.mybatis.typehandler.ShortDateHandler"/>
-        <!-- <typeHandler handler="com.tujia.train.mybatis.typehandler.JsonListTypeHandler" javaType="jsonListTypeHandler"/>
-         <typeHandler handler="com.tujia.train.mybatis.core.MyTypeHandler" javaType="string" jdbcType="VARBINARY"/>-->
-    </typeHandlers>
+        &ndash;&gt;
+        <typeHandler handler="com.lianli.train.mybatis.typehandler.ShortDateHandler"/>
+        &lt;!&ndash; <typeHandler handler="com.lianli.train.mybatis.typehandler.JsonListTypeHandler" javaType="jsonListTypeHandler"/>
+         <typeHandler handler="com.lianli.train.mybatis.core.MyTypeHandler" javaType="string" jdbcType="VARBINARY"/>&ndash;&gt;
+    </typeHandlers>-->
 
     <!--
     <objectFactory type=""/>
@@ -53,7 +49,7 @@
 
     <!-- 插件的使用 -->
     <plugins>
-        <plugin interceptor="com.tujia.train.mybatis.plugin.MyPlugin">
+        <plugin interceptor="com.lianli.train.mybatis.plugin.MyPlugin">
             <property name="dbType" value="mySql"/>
         </plugin>
     </plugins>
@@ -86,8 +82,8 @@
 
 
     <!--  <mappers>
-          <mapper class="com.tujia.train.mybatis.mapper.annotation.NewsMapper"/>
-          <mapper class ="com.tujia.train.mybatis.mapper.annotation.AuthorsMapper"/>
+          <mapper class="NewsMapper"/>
+          <mapper class ="AuthorsMapper"/>
       </mappers>-->
 
 
