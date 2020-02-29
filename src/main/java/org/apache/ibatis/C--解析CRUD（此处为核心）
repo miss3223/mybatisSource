@@ -1,0 +1,488 @@
+一、
+1、获取databaseId，根据不同值执行不同的数据库
+ private void buildStatementFromContext(List<XNode> list) {
+    if (configuration.getDatabaseId() != null) {
+      buildStatementFromContext(list, configuration.getDatabaseId());
+    }
+    buildStatementFromContext(list, null);
+  }
+2、调用XMLStatementBuilder解析SQL语句
+  private void buildStatementFromContext(List<XNode> list, String requiredDatabaseId) {
+    for (XNode context : list) {
+      final XMLStatementBuilder statementParser = new XMLStatementBuilder(configuration, builderAssistant, context, requiredDatabaseId);
+      try {
+        statementParser.parseStatementNode();
+      } catch (IncompleteElementException e) {
+        configuration.addIncompleteStatement(statementParser);
+      }
+    }
+  }
+3、（XMLStatementBuilder类中）
+（1）
+  public void parseStatementNode() {
+
+    // 获取属性值
+    String id = context.getStringAttribute("id");
+    String databaseId = context.getStringAttribute("databaseId");
+
+    if (!databaseIdMatchesCurrent(id, databaseId, this.requiredDatabaseId)) {
+      return;
+    }
+
+    Integer fetchSize = context.getIntAttribute("fetchSize");
+    Integer timeout = context.getIntAttribute("timeout");
+    String parameterMap = context.getStringAttribute("parameterMap");
+    String parameterType = context.getStringAttribute("parameterType");
+    Class<?> parameterTypeClass = resolveClass(parameterType);
+    String resultMap = context.getStringAttribute("resultMap");
+    String resultType = context.getStringAttribute("resultType");
+    // MyBatis 从 3.2 开始支持可插拔的脚本语言，因此你可以在插入一种语言的驱动（language driver）之后来写基于这种语言的动态 SQL 查询。
+    String lang = context.getStringAttribute("lang");
+    LanguageDriver langDriver = getLanguageDriver(lang);
+
+    Class<?> resultTypeClass = resolveClass(resultType);
+    // 结果集的类型，FORWARD_ONLY，SCROLL_SENSITIVE 或 SCROLL_INSENSITIVE 中的一个，默认值为 unset （依赖驱动）。
+    String resultSetType = context.getStringAttribute("resultSetType");
+     // 解析crud语句的类型，mybatis目前支持三种,prepare、硬编码、以及存储过程调用
+    StatementType statementType = StatementType.valueOf(context.getStringAttribute("statementType", StatementType.PREPARED.toString()));
+    ResultSetType resultSetTypeEnum = resolveResultSetType(resultSetType);
+
+    String nodeName = context.getNode().getNodeName();
+
+    // 解析SQL命令类型，目前主要有UNKNOWN, INSERT, UPDATE, DELETE, SELECT, FLUSH
+    SqlCommandType sqlCommandType = SqlCommandType.valueOf(nodeName.toUpperCase(Locale.ENGLISH));
+    boolean isSelect = sqlCommandType == SqlCommandType.SELECT;
+    // insert/delete/update后是否刷新缓存
+    boolean flushCache = context.getBooleanAttribute("flushCache", !isSelect);
+    // select是否使用缓存
+    boolean useCache = context.getBooleanAttribute("useCache", isSelect);
+    //这个设置仅针对嵌套结果 select 语句适用：如果为 true，就是假设包含了嵌套结果集或是分组了，
+    //这样的话当返回一个主结果行的时候，就不会发生有对前面结果集的引用的情况。
+    boolean resultOrdered = context.getBooleanAttribute("resultOrdered", false);
+
+    // Include Fragments before parsing
+    // 查询语句中包含的SQL片段
+    XMLIncludeTransformer includeParser = new XMLIncludeTransformer(configuration, builderAssistant);
+    includeParser.applyIncludes(context.getNode());
+
+    // Parse selectKey after includes and remove them.
+    processSelectKeyNodes(id, parameterTypeClass, langDriver);
+
+    // Parse the SQL (pre: <selectKey> and <include> were parsed and removed)
+    SqlSource sqlSource = langDriver.createSqlSource(configuration, context, parameterTypeClass);
+    String resultSets = context.getStringAttribute("resultSets");
+    String keyProperty = context.getStringAttribute("keyProperty");
+    String keyColumn = context.getStringAttribute("keyColumn");
+    KeyGenerator keyGenerator;
+    String keyStatementId = id + SelectKeyGenerator.SELECT_KEY_SUFFIX;
+    keyStatementId = builderAssistant.applyCurrentNamespace(keyStatementId, true);
+    if (configuration.hasKeyGenerator(keyStatementId)) {
+      keyGenerator = configuration.getKeyGenerator(keyStatementId);
+    } else {
+      keyGenerator = context.getBooleanAttribute("useGeneratedKeys",
+          configuration.isUseGeneratedKeys() && SqlCommandType.INSERT.equals(sqlCommandType))
+          ? Jdbc3KeyGenerator.INSTANCE : NoKeyGenerator.INSTANCE;
+    }
+
+    builderAssistant.addMappedStatement(id, sqlSource, statementType, sqlCommandType,
+        fetchSize, timeout, parameterMap, parameterTypeClass, resultMap, resultTypeClass,
+        resultSetTypeEnum, flushCache, useCache, resultOrdered,
+        keyGenerator, keyProperty, keyColumn, databaseId, langDriver, resultSets);
+  }
+
+  （2）
+
+  public void applyIncludes(Node source) {
+      Properties variablesContext = new Properties();
+      Properties configurationVariables = configuration.getVariables();
+      if (configurationVariables != null) {
+        variablesContext.putAll(configurationVariables);
+      }
+      applyIncludes(source, variablesContext, false);
+    }
+
+    /**
+     * Recursively apply includes through all SQL fragments.
+     * @param source Include node in DOM tree
+     * @param variablesContext Current context for static variables with values
+     */
+    private void applyIncludes(Node source, final Properties variablesContext, boolean included) {
+      if (source.getNodeName().equals("include")) {
+        Node toInclude = findSqlFragment(getStringAttribute(source, "refid"), variablesContext);
+        Properties toIncludeContext = getVariablesContext(source, variablesContext);
+        applyIncludes(toInclude, toIncludeContext, true);
+        if (toInclude.getOwnerDocument() != source.getOwnerDocument()) {
+          toInclude = source.getOwnerDocument().importNode(toInclude, true);
+        }
+        source.getParentNode().replaceChild(toInclude, source);
+        while (toInclude.hasChildNodes()) {
+          toInclude.getParentNode().insertBefore(toInclude.getFirstChild(), toInclude);
+        }
+        toInclude.getParentNode().removeChild(toInclude);
+      } else if (source.getNodeType() == Node.ELEMENT_NODE) {
+        if (included && !variablesContext.isEmpty()) {
+          // replace variables in attribute values
+          NamedNodeMap attributes = source.getAttributes();
+          for (int i = 0; i < attributes.getLength(); i++) {
+            Node attr = attributes.item(i);
+            attr.setNodeValue(PropertyParser.parse(attr.getNodeValue(), variablesContext));
+          }
+        }
+        NodeList children = source.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+          applyIncludes(children.item(i), variablesContext, included);
+        }
+      } else if (included && source.getNodeType() == Node.TEXT_NODE
+          && !variablesContext.isEmpty()) {
+        // replace variables in text node
+        source.setNodeValue(PropertyParser.parse(source.getNodeValue(), variablesContext));
+      }
+    }
+   4、解析SQL主体
+   （1）sql语句解析的核心：mybatis语言驱动器（解析器）XMLLanguageDriver
+    注意：这个是LanguageDriver定义的接口，XMLLanguageDriver实现了这个接口
+    public interface LanguageDriver {
+     ParameterHandler createParameterHandler(MappedStatement mappedStatement, Object parameterObject, BoundSql boundSql);
+     SqlSource createSqlSource(Configuration configuration, XNode script, Class<?> parameterType);
+     SqlSource createSqlSource(Configuration configuration, String script, Class<?> parameterType);
+    }
+   （2）XMLLanguageDriver中创建SqlSource
+     // 传递文本的格式
+     @Override
+     public SqlSource createSqlSource(Configuration configuration, XNode script, Class<?> parameterType) {
+       //创建XMLScriptBuilder对象
+       XMLScriptBuilder builder = new XMLScriptBuilder(configuration, script, parameterType);
+       return builder.parseScriptNode();
+     }
+
+    //
+     @Override
+     public SqlSource createSqlSource(Configuration configuration, String script, Class<?> parameterType) {
+       // issue #3
+       if (script.startsWith("<script>")) {
+         XPathParser parser = new XPathParser(script, false, configuration.getVariables(), new XMLMapperEntityResolver());
+         return createSqlSource(configuration, parser.evalNode("/script"), parameterType);
+       } else {
+         // issue #127
+         script = PropertyParser.parse(script, configuration.getVariables());
+         TextSqlNode textSqlNode = new TextSqlNode(script);
+         // 解析动态SQL
+         if (textSqlNode.isDynamic()) {
+           return new DynamicSqlSource(configuration, textSqlNode);
+         } else {
+           return new RawSqlSource(configuration, script, parameterType);
+         }
+       }
+     }
+     (3)创建XMLScriptBuilder对象，
+     //XMLScriptBuilder构造器中设置相关字段外，还硬编码了每个支持的动态元素对应的处理器
+      public XMLScriptBuilder(Configuration configuration, XNode context, Class<?> parameterType) {
+         super(configuration);
+         this.context = context;
+         this.parameterType = parameterType;
+         initNodeHandlerMap();
+       }
+
+      // 如果我们要支持额外的动态元素比如else/elsif，只要在map中添加对应的key/value对即可
+       private void initNodeHandlerMap() {
+           nodeHandlerMap.put("trim", new TrimHandler());
+           nodeHandlerMap.put("where", new WhereHandler());
+           nodeHandlerMap.put("set", new SetHandler());
+           nodeHandlerMap.put("foreach", new ForEachHandler());
+           nodeHandlerMap.put("if", new IfHandler());
+           nodeHandlerMap.put("choose", new ChooseHandler());
+           nodeHandlerMap.put("when", new IfHandler());
+           nodeHandlerMap.put("otherwise", new OtherwiseHandler());
+           nodeHandlerMap.put("bind", new BindHandler());
+         }
+
+
+     public SqlSource parseScriptNode() {
+         //解析动态标签
+         MixedSqlNode rootSqlNode = parseDynamicTags(context);
+         SqlSource sqlSource = null;
+         if (isDynamic) {
+           sqlSource = new DynamicSqlSource(configuration, rootSqlNode);
+         } else {
+           sqlSource = new RawSqlSource(configuration, rootSqlNode, parameterType);
+         }
+         return sqlSource;
+       }
+
+       protected MixedSqlNode parseDynamicTags(XNode node) {
+         List<SqlNode> contents = new ArrayList<>();
+         NodeList children = node.getNode().getChildNodes();
+         for (int i = 0; i < children.getLength(); i++) {
+           XNode child = node.newXNode(children.item(i));
+           if (child.getNode().getNodeType() == Node.CDATA_SECTION_NODE || child.getNode().getNodeType() == Node.TEXT_NODE) {
+             String data = child.getStringBody("");
+             TextSqlNode textSqlNode = new TextSqlNode(data);
+             // 判断文本节点中是否包含了${}，如果包含则为动态文本节点，否则为静态文本节点，静态文本节点在运行时不需要二次处理
+             /**
+              * 在如下代码中做的判断
+              * private GenericTokenParser createParser(TokenHandler handler) {
+              *     return new GenericTokenParser("${", "}", handler);
+              *   }
+              */
+             if (textSqlNode.isDynamic()) {
+               contents.add(textSqlNode);
+               isDynamic = true;
+             } else {
+               contents.add(new StaticTextSqlNode(data));
+             }
+           } else if (child.getNode().getNodeType() == Node.ELEMENT_NODE) { // issue #628 标签节点
+             String nodeName = child.getNode().getNodeName();
+             // 首先根据节点名称获取到对应的节点处理器
+             NodeHandler handler = nodeHandlerMap.get(nodeName);
+             if (handler == null) {
+               throw new BuilderException("Unknown element <" + nodeName + "> in SQL statement.");
+             }
+             // 使用对应的节点处理器处理本节点
+             handler.handleNode(child, contents);
+             isDynamic = true;
+           }
+         }
+         return new MixedSqlNode(contents);
+       }
+       4、不同节点处理器的实现
+       （1）IfHandler
+         private class IfHandler implements NodeHandler {
+           public IfHandler() {
+             // Prevent Synthetic Access
+           }
+
+           @Override
+           public void handleNode(XNode nodeToHandle, List<SqlNode> targetContents) {
+             // 判断if条件里面是否有动态文本节点，如果有，则进行赋值
+             MixedSqlNode mixedSqlNode = parseDynamicTags(nodeToHandle);
+             // 获取if属性的值，将值设置为IfSqlNode的属性，便于运行时解析
+             String test = nodeToHandle.getStringAttribute("test");
+             IfSqlNode ifSqlNode = new IfSqlNode(mixedSqlNode, test);
+             targetContents.add(ifSqlNode);
+           }
+         }
+       （2）OtherwiseHandler
+       //otherwise标签可以说并不是一个真正有意义的标签，它不做任何处理，用在choose标签的最后默认分支
+        private class OtherwiseHandler implements NodeHandler {
+           public OtherwiseHandler() {
+             // Prevent Synthetic Access
+           }
+
+           @Override
+           public void handleNode(XNode nodeToHandle, List<SqlNode> targetContents) {
+             MixedSqlNode mixedSqlNode = parseDynamicTags(nodeToHandle);
+             targetContents.add(mixedSqlNode);
+           }
+         }
+      （3）BindHandler（为啥可以预防，怎么预防的）
+        bind 元素可以使用 OGNL 表达式创建一个变量并将其绑定到当前SQL节点的上下文。
+        <select id="selectBlogsLike" parameterType="BlogQuery" resultType="Blog">
+          <bind name="pattern" value="'%' + title + '%'" />
+          SELECT * FROM BLOG
+          WHERE title LIKE #{pattern}
+        </select>
+        对于这种情况，bind还可以用来预防 SQL 注入。
+         private class BindHandler implements NodeHandler {
+            public BindHandler() {
+              // Prevent Synthetic Access
+            }
+
+        @Override
+        public void handleNode(XNode nodeToHandle, List<SqlNode> targetContents) {
+           final String name = nodeToHandle.getStringAttribute("name");
+           final String expression = nodeToHandle.getStringAttribute("value");
+           final VarDeclSqlNode node = new VarDeclSqlNode(name, expression);
+           targetContents.add(node);
+            }
+          }
+      （4）ChooseHandler
+         choose节点应该说和switch是等价的，其中的when就是各种条件判断
+         private class ChooseHandler implements NodeHandler {
+          public ChooseHandler() {
+            // Prevent Synthetic Access
+          }
+
+          @Override
+          public void handleNode(XNode nodeToHandle, List<SqlNode> targetContents) {
+            List<SqlNode> whenSqlNodes = new ArrayList<>();
+            List<SqlNode> otherwiseSqlNodes = new ArrayList<>();
+            // 拆分出when 和 otherwise 节点
+            handleWhenOtherwiseNodes(nodeToHandle, whenSqlNodes, otherwiseSqlNodes);
+            SqlNode defaultSqlNode = getDefaultSqlNode(otherwiseSqlNodes);
+            ChooseSqlNode chooseSqlNode = new ChooseSqlNode(whenSqlNodes, defaultSqlNode);
+            targetContents.add(chooseSqlNode);
+          }
+
+          private void handleWhenOtherwiseNodes(XNode chooseSqlNode, List<SqlNode> ifSqlNodes, List<SqlNode> defaultSqlNodes) {
+            List<XNode> children = chooseSqlNode.getChildren();
+            for (XNode child : children) {
+              String nodeName = child.getNode().getNodeName();
+              NodeHandler handler = nodeHandlerMap.get(nodeName);
+              if (handler instanceof IfHandler) {
+                handler.handleNode(child, ifSqlNodes);
+              } else if (handler instanceof OtherwiseHandler) {
+                handler.handleNode(child, defaultSqlNodes);
+              }
+            }
+          }
+
+          private SqlNode getDefaultSqlNode(List<SqlNode> defaultSqlNodes) {
+            SqlNode defaultSqlNode = null;
+            if (defaultSqlNodes.size() == 1) {
+              defaultSqlNode = defaultSqlNodes.get(0);
+            } else if (defaultSqlNodes.size() > 1) {
+              throw new BuilderException("Too many default (otherwise) elements in choose statement.");
+            }
+            return defaultSqlNode;
+          }
+        }
+      （5）ForEachHandler
+       foreach可以将任何可迭代对象（如列表、集合等）和任何的字典或者数组对象传递给foreach作为集合参数。
+       private class ForEachHandler implements NodeHandler {
+           public ForEachHandler() {
+             // Prevent Synthetic Access
+           }
+
+      @Override
+       public void handleNode(XNode nodeToHandle, List<SqlNode> targetContents) {
+          MixedSqlNode mixedSqlNode = parseDynamicTags(nodeToHandle);
+
+          String collection = nodeToHandle.getStringAttribute("collection");
+          //本次迭代获取的元素
+          String item = nodeToHandle.getStringAttribute("item");
+          //当前迭代的次数
+          String index = nodeToHandle.getStringAttribute("index");
+          String open = nodeToHandle.getStringAttribute("open");
+          String close = nodeToHandle.getStringAttribute("close");
+          String separator = nodeToHandle.getStringAttribute("separator");
+          ForEachSqlNode forEachSqlNode = new ForEachSqlNode(configuration, mixedSqlNode, collection， index, item, open, close, separator);
+          targetContents.add(forEachSqlNode);
+           }
+         }
+       (6)SetHandler
+       set标签主要用于解决update动态字段
+       <update id="updateAuthorIfNecessary">
+         update Author
+           <set>
+             <if test="username != null">username=#{username},</if>
+             <if test="password != null">password=#{password},</if>
+             <if test="email != null">email=#{email},</if>
+             <if test="bio != null">bio=#{bio}</if>
+           </set>
+         where id=#{id}
+       </update>
+       因为在set中内容为空的时候，set会被trim掉，所以set实际上是trim的一种特殊实现。
+        private class SetHandler implements NodeHandler {
+           public SetHandler() {
+             // Prevent Synthetic Access
+           }
+
+           @Override
+           public void handleNode(XNode nodeToHandle, List<SqlNode> targetContents) {
+             MixedSqlNode mixedSqlNode = parseDynamicTags(nodeToHandle);
+             SetSqlNode set = new SetSqlNode(configuration, mixedSqlNode);
+             targetContents.add(set);
+           }
+         }
+      （7）TrimHandler
+       trim使用最多的情况是截掉where条件中的前置OR和AND，update的set子句中的后置”,”，同时在内容不为空的时候加上where和set。
+       select * from user
+       <trim prefix="WHERE" prefixoverride="AND |OR">
+           <if test="name != null and name.length()>0"> AND name=#{name}</if>
+           <if test="gender != null and gender.length()>0"> AND gender=#{gender}</if>
+       </trim>
+       update user
+       <trim prefix="set" suffixoverride="," suffix=" where id = #{id} ">
+           <if test="name != null and name.length()>0"> name=#{name} , </if>
+           <if test="gender != null and gender.length()>0"> gender=#{gender} ,  </if>
+       </trim>
+       虽然这两者都可以通过非动态标签来解决。从性能角度来说，这两者是可以避免的。
+       private class TrimHandler implements NodeHandler {
+           public TrimHandler() {
+             // Prevent Synthetic Access
+           }
+
+       @Override
+       public void handleNode(XNode nodeToHandle, List<SqlNode> targetContents) {
+            public void handleNode(XNode nodeToHandle, List<SqlNode> targetContents) {
+                 MixedSqlNode mixedSqlNode = parseDynamicTags(nodeToHandle);
+                 //包含的子节点解析后SQL文本不为空时要添加的前缀内容
+                 String prefix = nodeToHandle.getStringAttribute("prefix");
+                 // 要覆盖的子节点解析后SQL文本前缀内容
+                 String prefixOverrides = nodeToHandle.getStringAttribute("prefixOverrides");
+                 // 包含的子节点解析后SQL文本不为空时要添加的后缀内容
+                 String suffix = nodeToHandle.getStringAttribute("suffix");
+                 // 要覆盖的子节点解析后SQL文本后缀内容
+                 String suffixOverrides = nodeToHandle.getStringAttribute("suffixOverrides");
+                 TrimSqlNode trim = new TrimSqlNode(configuration, mixedSqlNode, prefix, prefixOverrides, suffix, suffixOverrides);
+                 targetContents.add(trim);
+               }
+         }
+       (8) WhereHandler
+       和set一样，where也是trim的特殊情况，同样where标签也不是必须的，可以通过方式解决
+       private class WhereHandler implements NodeHandler {
+           public WhereHandler() {
+             // Prevent Synthetic Access
+           }
+
+           @Override
+           public void handleNode(XNode nodeToHandle, List<SqlNode> targetContents) {
+             MixedSqlNode mixedSqlNode = parseDynamicTags(nodeToHandle);
+             WhereSqlNode where = new WhereSqlNode(configuration, mixedSqlNode);
+             targetContents.add(where);
+           }
+         }
+
+       5、静态SQL创建RawSqlSource（RawSqlSource）
+       （1）RawSqlSource类中
+       public class RawSqlSource implements SqlSource {
+
+         private final SqlSource sqlSource;
+
+         public RawSqlSource(Configuration configuration, SqlNode rootSqlNode, Class<?> parameterType) {
+           this(configuration, getSql(configuration, rootSqlNode), parameterType);
+         }
+
+         public RawSqlSource(Configuration configuration, String sql, Class<?> parameterType) {
+         //创建SqlBuilder对象
+           SqlSourceBuilder sqlSourceParser = new SqlSourceBuilder(configuration);
+           Class<?> clazz = parameterType == null ? Object.class : parameterType;
+           sqlSource = sqlSourceParser.parse(sql, clazz, new HashMap<String, Object>());
+         }
+
+         private static String getSql(Configuration configuration, SqlNode rootSqlNode) {
+           DynamicContext context = new DynamicContext(configuration, null);
+           rootSqlNode.apply(context);
+           return context.getSql();
+         }
+
+         @Override
+         public BoundSql getBoundSql(Object parameterObject) {
+           return sqlSource.getBoundSql(parameterObject);
+         }
+
+       }
+
+        public DynamicContext(Configuration configuration, Object parameterObject) {
+           if (parameterObject != null && !(parameterObject instanceof Map)) {
+             MetaObject metaObject = configuration.newMetaObject(parameterObject);
+             bindings = new ContextMap(metaObject);
+           } else {
+             bindings = new ContextMap(null);
+           }
+           bindings.put(PARAMETER_OBJECT_KEY, parameterObject);
+           bindings.put(DATABASE_ID_KEY, configuration.getDatabaseId());
+         }
+
+     （2）SqlSourceBuilder类中
+      public SqlSource parse(String originalSql, Class<?> parameterType, Map<String, Object> additionalParameters) {
+         ParameterMappingTokenHandler handler = new ParameterMappingTokenHandler(configuration, parameterType, additionalParameters);
+         GenericTokenParser parser = new GenericTokenParser("#{", "}", handler);
+         String sql = parser.parse(originalSql);
+         return new StaticSqlSource(configuration, sql, handler.getParameterMappings());
+       }
+
+
+
+
+

@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
+<mapper namespace="com.tujia.train.mybatis.mapper.xml.NewsMapper">
+
+    <sql id="Base_Column_List">
+        id,
+        title,
+        author_id,
+        content,
+        create_time,
+        update_time,
+        image,
+        image_name
+    </sql>
+
+
+    <!-- 使用like用法：columnName like concat('%',domain.name,'%') -->
+    <sql id="where-condition">
+        <trim prefix="where" prefixOverrides="and | or ">
+            <if test="id != null">and id = #{id}</if>
+            <if test="title != null">and title = #{title}</if>
+            <if test="authorId != null">and author_id = #{authorId}</if>
+            <if test="content != null and content != ''">and content = #{content}</if>
+            <if test="createTime != null">and create_time = #{createTime}</if>
+            <if test="updateTime != null and updateTime != ''">and update_time = #{updateTime}</if>
+            <if test="image != null and image != ''">and image = #{image}</if>
+            <if test="imageName != null">and image_name = #{imageName}</if>
+        </trim>
+    </sql>
+
+    <select id="selectAndOrder" resultType="com.tujia.train.mybatis.vo.NewsVo">
+        select <include refid="Base_Column_List" />
+        from news
+        <include refid="where-condition" />
+    </select>
+
+    <select id="select" resultType="com.tujia.train.mybatis.vo.NewsVo">
+
+
+    </select>
+
+
+    <!-- 查找-->
+    <select id="queryList" resultType="com.tujia.train.mybatis.vo.NewsVo">
+        select <include refid="Base_Column_List" />
+        from news
+    </select>
+
+    <!-- 新增-->
+    <insert id="insert" parameterType="com.tujia.train.mybatis.po.News" useGeneratedKeys="true" keyProperty="id">
+        insert into news
+        <trim prefix="(" suffix=")" suffixOverrides="," >
+            <if test="title != null">title,</if>
+            <if test="authorId != null">author_id,</if>
+            <if test="content != null">content,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="updateTime != null">update_time,</if>
+            <if test="image != null">image,</if>
+            <if test="imageName != null">imageName,</if>
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides="," >
+            <if test="title != null">#{title},</if>
+            <if test="authorId != null">#{author_id},</if>
+            <if test="content != null">#{content},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="updateTime != null">#{updateTime},</if>
+            <if test="image != null">#{image},</if>
+            <if test="imageName != null">#{imageName},</if>
+        </trim>
+    </insert>
+
+
+    <!-- 更新-->
+    <update id="update" parameterType="com.tujia.train.mybatis.po.News">
+        update news
+        <trim prefix="set" suffixOverrides=",">
+            <if test="title != null">title = #{title},</if>
+            <if test="authorId != null">author_id = #{authorId},</if>
+            <if test="content != null">content = #{content},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+            <if test="image != null">image = #{image},</if>
+            <if test="imageName != null">image_name = #{imageName},</if>
+        </trim>
+        <where>id = #{id}</where>
+    </update>
+
+    <!-- 删除 -->
+    <delete id="deleteNews">
+        delete from news
+        <where>id = #{id}</where>
+    </delete>
+
+    <!-- 批量新增-->
+    <insert id="batchInsertNews" useGeneratedKeys="true" keyProperty="id" parameterType="com.tujia.train.mybatis.po.News">
+
+        insert into News
+        (title,author_id,content)
+        values
+        <foreach collection="list" item="md"  separator="," >
+            (#{md.title},#{md.authorId},#{md.content})
+        </foreach>
+    </insert>
+
+
+</mapper>

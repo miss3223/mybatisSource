@@ -1,0 +1,222 @@
+一、sqlSource
+  1、SqlSource是XML文件或者注解方法中映射语句的实现时表示，通过SqlSourceBuilder.parse()方法创建，
+     SqlSourceBuilder中符号解析器将mybatis中的查询参数#{}转换为?，并记录了参数的顺序。
+  2、getBoundSql
+   （1）getBoundSql用于获取映射语句对象的各个组成部分
+     /**
+      * Represents the content of a mapped statement read from an XML file or an annotation.
+      * It creates the SQL that will be passed to the database out of the input parameter received from the user.
+      * 代表从XML文件或者注解读取的映射语句的内容,它创建的SQL会被传递给数据库。
+      *
+      * @author Clinton Begin
+      */
+     public interface SqlSource {
+
+
+       BoundSql getBoundSql(Object parameterObject);
+
+     }
+   （2）SQLSource的四种实现
+    StaticSqlSource：最终静态SQL语句的封装,其他类型的SqlSource最终都委托给StaticSqlSource。
+    RawSqlSource：原始静态SQL语句的封装,在加载时就已经确定了SQL语句,没有、等动态标签和${} SQL拼接,比动态SQL语句要快,因为不需要运行时解析SQL节点。
+    DynamicSqlSource：动态SQL语句的封装，在运行时需要根据参数处理、等标签或者${} SQL拼接之后才能生成最后要执行的静态SQL语句。
+    ProviderSqlSource：当SQL语句通过指定的类和方法获取时(使用@XXXProvider注解)，需要使用本类，它会通过反射调用相应的方法得到SQL语句。
+二、sqlNode
+   1、SqlNode接口主要用来处理CRUD节点下的各类动态标签，mybatis都提供了对应的SqlNode实现，
+      这些动态标签可以相互嵌套且实现上采用单向链表进行应用，这样后面如果需要增加其他动态标签，就只需要新增对应的SqlNode实现就能支持。
+      public interface SqlNode {
+        boolean apply(DynamicContext context);
+      }
+   2、ChooseSqlNode
+   /**
+    * @author Clinton Begin
+    *
+    * //调用的地方
+    * ChooseSqlNode chooseSqlNode = new ChooseSqlNode(whenSqlNodes, defaultSqlNode);
+    */
+   public class ChooseSqlNode implements SqlNode {
+     private final SqlNode defaultSqlNode;
+     private final List<SqlNode> ifSqlNodes;
+
+     public ChooseSqlNode(List<SqlNode> ifSqlNodes, SqlNode defaultSqlNode) {
+       this.ifSqlNodes = ifSqlNodes;
+       this.defaultSqlNode = defaultSqlNode;
+     }
+
+     @Override
+     public boolean apply(DynamicContext context) {
+       // 遍历所有when分支节点，只要遇到第一个为true就返回
+       for (SqlNode sqlNode : ifSqlNodes) {
+         if (sqlNode.apply(context)) {
+           return true;
+         }
+       }
+       // 全部when都为false时，走otherwise分支
+       if (defaultSqlNode != null) {
+         defaultSqlNode.apply(context);
+         return true;
+       }
+       return false;
+     }
+   }
+   3、ForEachSqlNode
+   （1）foreach 元素的功能非常强大，它允许你指定一个集合，声明可以在元素体内使用的集合项（item）和索引（index）变量。
+       它也允许你指定开头与结尾的字符串以及在迭代结果之间放置分隔符。这个元素是很智能的，因此它不会偶然地附加多余的分隔符。
+    注意：你可以将任何可迭代对象（如 List、Set 等）、Map 对象或者数组对象传递给 foreach 作为集合参数。当使用可迭代对象或者数组时，
+         index 是当前迭代的次数，item 的值是本次迭代获取的元素。当使用 Map 对象（或者 Map.Entry 对象的集合）时，index 是键，item 是值。
+    @Override
+     public boolean apply(DynamicContext context) {
+       Map<String, Object> bindings = context.getBindings();
+       // 将Map/Array/List统一包装为迭代器接口
+       final Iterable<?> iterable = evaluator.evaluateIterable(collectionExpression, bindings);
+       if (!iterable.iterator().hasNext()) {
+         return true;
+       }
+       boolean first = true;
+       //将open属性的值append 到sql语句中
+       applyOpen(context);
+       int i = 0;
+       for (Object o : iterable) {
+         DynamicContext oldContext = context;
+         if (first || separator == null) {
+           context = new PrefixedContext(context, "");
+         } else {
+           context = new PrefixedContext(context, separator);
+         }
+         int uniqueNumber = context.getUniqueNumber();
+         // Issue #709
+         if (o instanceof Map.Entry) {
+           //map条目的处理
+           @SuppressWarnings("unchecked")
+           Map.Entry<Object, Object> mapEntry = (Map.Entry<Object, Object>) o;
+           applyIndex(context, mapEntry.getKey(), uniqueNumber);
+           applyItem(context, mapEntry.getValue(), uniqueNumber);
+         } else {
+           //list条目的处理
+           applyIndex(context, i, uniqueNumber);
+           applyItem(context, o, uniqueNumber);
+         }
+         // 子节点SqlNode处理，很重要的一个逻辑就是将#{item.XXX}转换为#{__frch_item_N.XXX}，这样在JDBC设置参数的时候就能够找到对应的参数值了
+         contents.apply(new FilteredDynamicContext(configuration, context, index, item, uniqueNumber));
+         if (first) {
+           first = !((PrefixedContext) context).isPrefixApplied();
+         }
+         context = oldContext;
+         i++;
+       }
+       applyClose(context);
+       context.getBindings().remove(item);
+       context.getBindings().remove(index);
+       return true;
+     }
+   4、IfSqlNode
+   这条语句提供了一种可选的查找文本功能
+   public class IfSqlNode implements SqlNode {
+     private final ExpressionEvaluator evaluator;
+     private final String test;
+     private final SqlNode contents;
+
+     public IfSqlNode(SqlNode contents, String test) {
+       this.test = test;
+       this.contents = contents;
+       this.evaluator = new ExpressionEvaluator();
+     }
+
+     @Override
+     public boolean apply(DynamicContext context) {
+       if (evaluator.evaluateBoolean(test, context.getBindings())) {
+         contents.apply(context);
+         return true;
+       }
+       return false;
+     }
+
+   }
+
+   public class ExpressionEvaluator {
+       // 布尔表达式解析，对于返回值为数字的if表达式,0为假，非0为真
+     public boolean evaluateBoolean(String expression, Object parameterObject) {
+       Object value = OgnlCache.getValue(expression, parameterObject);
+       if (value instanceof Boolean) {
+         return (Boolean) value;
+       }
+       if (value instanceof Number) {
+         return new BigDecimal(String.valueOf(value)).compareTo(BigDecimal.ZERO) != 0;
+       }
+       return value != null;
+     }
+
+     // 循环表达式解析，主要用于foreach标签
+     public Iterable<?> evaluateIterable(String expression, Object parameterObject) {
+       Object value = OgnlCache.getValue(expression, parameterObject);
+       if (value == null) {
+         throw new BuilderException("The expression '" + expression + "' evaluated to a null value.");
+       }
+       if (value instanceof Iterable) {
+         return (Iterable<?>) value;
+       }
+       if (value.getClass().isArray()) {
+           // the array may be primitive, so Arrays.asList() may throw
+           // a ClassCastException (issue 209).  Do the work manually
+           // Curse primitives! :) (JGB)
+           int size = Array.getLength(value);
+           List<Object> answer = new ArrayList<>();
+           for (int i = 0; i < size; i++) {
+               Object o = Array.get(value, i);
+               answer.add(o);
+           }
+           return answer;
+       }
+       if (value instanceof Map) {
+         return ((Map) value).entrySet();
+       }
+       throw new BuilderException("Error evaluating expression '" + expression + "'.  Return value (" + value + ") was not iterable.");
+     }
+
+   }
+   5、StaticTextSqlNode
+   　静态文本节点不做任何处理，直接将本文本节点的内容追加到已经解析了的SQL文本的后面。
+     public class StaticTextSqlNode implements SqlNode {
+       private final String text;
+
+       public StaticTextSqlNode(String text) {
+         this.text = text;
+       }
+
+       @Override
+       public boolean apply(DynamicContext context) {
+         context.appendSql(text);
+         return true;
+       }
+
+   }
+   6、TextSqlNode
+   TextSqlNode主要是用来将${}转换为实际的参数值，并返回拼接后的SQL语句，为了防止SQL注入，可以通过标签来创建OGNL上下文变量。
+
+   7、VarDeclSqlNode
+   public class VarDeclSqlNode implements SqlNode {
+
+     private final String name;
+     private final String expression;
+
+     public VarDeclSqlNode(String var, String exp) {
+       name = var;
+       expression = exp;
+     }
+
+     @Override
+     public boolean apply(DynamicContext context) {
+       final Object value = OgnlCache.getValue(expression, context.getBindings());
+        // 直接将ognl表达式加到当前映射语句的上下文中，这样就可以直接获取到了
+       context.bind(name, value);
+       return true;
+     }
+
+   }
+
+   8、TrimSqlNode
+
+
+
+
+
