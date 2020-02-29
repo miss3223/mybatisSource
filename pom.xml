@@ -153,6 +153,7 @@
           <groupId>org.javassist</groupId>
         </exclusion>
       </exclusions>
+      <!-- 将这个注释或者改成false ，就是需要层级依赖 -->
       <!-- <optional>true</optional>-->
     </dependency>
     <dependency>
